@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY matching_service/requirements.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY proto/ proto/
+COPY common/ common/
+COPY matching_service/ matching_service/
+
+ENV PYTHONPATH=/app
+
+CMD ["uvicorn", "matching_service.main:app", "--host", "0.0.0.0", "--port", "8002"]

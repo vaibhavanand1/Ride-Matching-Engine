@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package driver;
+
+message LocationUpdate {
+  string driver_id = 1;
+  double latitude = 2;
+  double longitude = 3;
+  int64 timestamp = 4;
+}
+
+message LocationResponse {
+  string driver_id = 1;
+  bool acknowledged = 2;
+  string message = 3;
+  int64 server_timestamp = 4;
+}
+
+service DriverTracking {
+  rpc StreamLocation(stream LocationUpdate) returns (stream LocationResponse);
+}

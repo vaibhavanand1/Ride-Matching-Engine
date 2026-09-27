@@ -1,0 +1,30 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Pytest & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Results / CSVs (keep directory, ignore bulk test artifacts if needed)
+results/*.csv
+results/*_failures.csv
+results/*_stats_history.csv
+
+# Environment & DB
+.env
+*.sqlite3
+pgdata/
+
+# IDE
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,95 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ride_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: rides_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rides_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ride_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  driver-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.driver
+    container_name: ride_driver_service
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/rides_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      GEO_BACKEND: ${GEO_BACKEND:-redis}
+      H3_RESOLUTION: ${H3_RESOLUTION:-8}
+      DRIVER_SERVICE_PORT: 8001
+      DRIVER_SERVICE_GRPC_PORT: 50051
+    ports:
+      - "8001:8001"
+      - "50051:50051"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  matching-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.matching
+    container_name: ride_matching_service
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/rides_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      GEO_BACKEND: ${GEO_BACKEND:-redis}
+      H3_RESOLUTION: ${H3_RESOLUTION:-8}
+      MATCHING_SERVICE_PORT: 8002
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  rider-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.rider
+    container_name: ride_rider_service
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/rides_db
+      MATCHING_SERVICE_URL: http://matching-service:8002
+      RIDER_SERVICE_PORT: 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      matching-service:
+        condition: service_started
+
+volumes:
+  pgdata:
