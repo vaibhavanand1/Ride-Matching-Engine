@@ -69,7 +69,6 @@ def request_ride(
     backend: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    # Auto-create rider if not already registered (convenient for load testing)
     rider = db.query(Rider).filter(Rider.id == payload.rider_id).first()
     if not rider:
         rider = Rider(id=payload.rider_id, name=f"Rider-{payload.rider_id[:8]}")
@@ -88,7 +87,6 @@ def request_ride(
     db.commit()
     db.refresh(ride)
 
-    # Dispatch to matching service
     try:
         params = {"backend": backend} if backend else {}
         with httpx.Client(timeout=4.0) as client:
@@ -103,13 +101,11 @@ def request_ride(
             )
             if resp.status_code == 200:
                 match_data = resp.json()
-                # Refresh ride from DB to get updated status and timestamps
                 db.refresh(ride)
             else:
                 ride.status = "no_driver_found"
                 db.commit()
     except Exception:
-        # If matching-service is unreachable or times out, keep as pending or mark failed
         pass
 
     return RideResponse(

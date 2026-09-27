@@ -30,11 +30,9 @@ def match_ride(
     for driver_id in candidates:
         lock = DriverLock(redis_conn, driver_id, ttl=5)
         if not lock.acquire():
-            # Another request is concurrently assigning or evaluating this driver
             continue
 
         try:
-            # Fast check in Redis before hitting the DB
             live_status = redis_conn.get(f"driver:status:{driver_id}")
             if live_status and live_status != "available":
                 continue
@@ -43,7 +41,6 @@ def match_ride(
             if not driver or driver.status != "available":
                 continue
 
-            # Driver is confirmed available; atomically flip state
             redis_conn.set(f"driver:status:{driver_id}", "busy")
             driver.status = "busy"
 

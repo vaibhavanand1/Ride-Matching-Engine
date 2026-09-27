@@ -26,9 +26,7 @@ def populate_drivers(count: int, backend_name: str):
     redis_geo = RedisGeoBackend(redis_conn)
     h3_geo = H3GeoBackend(redis_conn)
 
-    # Clean old geo keys
     redis_conn.delete("drivers:geo")
-    # Flush h3 cells if needed
     for key in redis_conn.scan_iter("h3:*"):
         redis_conn.delete(key)
     for key in redis_conn.scan_iter("driver:cell:*"):
@@ -47,7 +45,6 @@ def populate_drivers(count: int, backend_name: str):
         db.bulk_save_objects(batch)
         db.commit()
 
-    # Reset all drivers to available in Postgres
     db.query(Driver).filter(Driver.id.in_(driver_ids)).update(
         {Driver.status: "available"}, synchronize_session=False
     )

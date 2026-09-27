@@ -11,7 +11,6 @@ def test_concurrent_match_single_driver(
 ):
     geo_backend = request.getfixturevalue(backend_fixture)
 
-    # Single available driver
     solo_driver = Driver(id="solo_driver", name="Solo Driver", status="available")
     db_session.add(solo_driver)
 
@@ -35,12 +34,10 @@ def test_concurrent_match_single_driver(
 
     db_session.commit()
 
-    # Seed Redis
     redis_conn.set("driver:status:solo_driver", "available")
     geo_backend.update_driver_location("solo_driver", 37.7749, -122.4194)
 
     def attempt_match(ride_id: str):
-        # Dedicated session per thread to avoid race conditions inside SQLAlchemy session
         thread_db = SessionLocal()
         try:
             return match_ride(
@@ -54,7 +51,6 @@ def test_concurrent_match_single_driver(
         finally:
             thread_db.close()
 
-    # Fire all match requests concurrently
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_concurrent_riders) as pool:
         futures = [pool.submit(attempt_match, r_id) for r_id in ride_ids]
         results = [f.result() for f in futures]
@@ -62,12 +58,10 @@ def test_concurrent_match_single_driver(
     matched_results = [r for r in results if r["status"] == "matched"]
     unmatched_results = [r for r in results if r["status"] == "no_driver_found"]
 
-    # Exactly one request must succeed in acquiring the single driver
     assert len(matched_results) == 1, f"Expected 1 match, got {len(matched_results)}"
     assert matched_results[0]["driver_id"] == "solo_driver"
     assert len(unmatched_results) == num_concurrent_riders - 1
 
-    # Verify database consistency: exactly one ride assigned to solo_driver
     matched_rides = (
         db_session.query(Ride).filter(Ride.driver_id == "solo_driver").all()
     )
@@ -75,7 +69,6 @@ def test_concurrent_match_single_driver(
     assert matched_rides[0].id == matched_results[0]["ride_id"]
     assert matched_rides[0].status == "matched"
 
-    # Verify driver marked busy
     db_session.refresh(solo_driver)
     assert solo_driver.status == "busy"
     assert redis_conn.get("driver:status:solo_driver") == "busy"

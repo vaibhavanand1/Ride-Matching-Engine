@@ -51,7 +51,6 @@ async def driver_stream_worker(
             # Random walk roughly 50m - 100m per step
             lat += random.uniform(-0.0008, 0.0008)
             lon += random.uniform(-0.0008, 0.0008)
-            # Bounce off edges
             lat = max(LAT_MIN, min(LAT_MAX, lat))
             lon = max(LON_MIN, min(LON_MAX, lon))
 

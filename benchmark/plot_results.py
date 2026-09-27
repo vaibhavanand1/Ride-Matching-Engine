@@ -25,7 +25,6 @@ def generate_charts(results_dir: str = "results"):
 
         try:
             df = pd.read_csv(f)
-            # Find the row for /rides/request or Aggregated
             req_row = df[df["Name"] == "/rides/request"]
             if req_row.empty:
                 req_row = df[df["Name"] == "Aggregated"]
@@ -50,7 +49,6 @@ def generate_charts(results_dir: str = "results"):
 
     data = pd.DataFrame(records).sort_values("driver_count")
 
-    # Plot 1: Latency vs Driver Count
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
     backends = data["backend"].unique()
@@ -73,7 +71,6 @@ def generate_charts(results_dir: str = "results"):
     ax1.grid(True, linestyle="--", alpha=0.5)
     ax1.legend()
 
-    # Plot 2: Throughput (RPS) vs Driver Count
     for b in backends:
         b_data = data[data["backend"] == b]
         c = colors.get(b, "#4b5563")

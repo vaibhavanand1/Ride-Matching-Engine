@@ -1,4 +1,4 @@
-# Distributed Ride Dispatcher
+# Distributed Ride Matching Engine & Dispatcher
 
 A high-concurrency, distributed ride-matching backend system built in Python. Designed as a production-grade portfolio project showcasing real-world backend architecture, spatial indexing algorithms, distributed locking, and protocol selection.
 
@@ -239,6 +239,8 @@ Output is saved to `results/` including CSV latency distributions and comparison
 ## Benchmark Results: Redis-GEO vs Uber H3
 
 The benchmark was executed against both spatial engines across driver fleet densities from 100 to 10,000 drivers within a 20km x 20km urban area.
+
+![Benchmark Comparison](results/benchmark_comparison.png)
 
 | Backend | Driver Count | Requests / Sec | p50 Latency (ms) | p95 Latency (ms) | p99 Latency (ms) |
 | :--- | :--- | :--- | :--- | :--- | :--- |

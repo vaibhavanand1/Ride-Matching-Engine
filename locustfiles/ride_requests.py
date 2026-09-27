@@ -3,7 +3,6 @@ import random
 import uuid
 from locust import HttpUser, task, between
 
-# Matches the simulator's city bounds
 LAT_MIN, LAT_MAX = 37.685, 37.865
 LON_MIN, LON_MAX = -122.529, -122.309
 

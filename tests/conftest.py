@@ -25,7 +25,6 @@ def redis_conn():
 @pytest.fixture
 def db_session():
     session: Session = SessionLocal()
-    # Clean tables
     session.query(Ride).delete()
     session.query(Driver).delete()
     session.query(Rider).delete()
