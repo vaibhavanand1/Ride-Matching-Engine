@@ -29,6 +29,36 @@ services:
       timeout: 5s
       retries: 5
 
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: ride_kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # Memory capped to 256MB for small machines and AWS Free Tier
+      KAFKA_JVM_PERFORMANCE_OPTS: "-Xms128m -Xmx256m"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
   driver-service:
     build:
       context: .
@@ -39,6 +69,7 @@ services:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/rides_db
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       GEO_BACKEND: ${GEO_BACKEND:-redis}
       H3_RESOLUTION: ${H3_RESOLUTION:-8}
       DRIVER_SERVICE_PORT: 8001
@@ -51,6 +82,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
 
   matching-service:
     build:
@@ -62,6 +95,7 @@ services:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/rides_db
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       GEO_BACKEND: ${GEO_BACKEND:-redis}
       H3_RESOLUTION: ${H3_RESOLUTION:-8}
       MATCHING_SERVICE_PORT: 8002
@@ -72,6 +106,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
 
   rider-service:
     build:
@@ -81,6 +117,9 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/rides_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       MATCHING_SERVICE_URL: http://matching-service:8002
       RIDER_SERVICE_PORT: 8000
     ports:
@@ -90,6 +129,9 @@ services:
         condition: service_healthy
       matching-service:
         condition: service_started
+      kafka:
+        condition: service_healthy
 
 volumes:
   pgdata:
+  kafka_data:

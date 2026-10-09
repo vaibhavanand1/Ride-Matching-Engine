@@ -23,10 +23,6 @@ def test_matching_success(db_session, redis_conn, redis_geo):
     redis_conn.set("driver:status:driver_1", "available")
     redis_geo.update_driver_location("driver_1", 37.7750, -122.4190)
 
-    pubsub = redis_conn.pubsub()
-    pubsub.subscribe("ride_updates:ride_100")
-    pubsub.get_message(timeout=1.0)
-
     result = match_ride(
         ride_id="ride_100",
         pickup_lat=37.7749,
@@ -47,12 +43,6 @@ def test_matching_success(db_session, redis_conn, redis_geo):
     assert ride.matched_at is not None
 
     assert redis_conn.get("driver:status:driver_1") == "busy"
-
-    msg = pubsub.get_message(timeout=2.0)
-    assert msg is not None
-    payload = json.loads(msg["data"])
-    assert payload["status"] == "matched"
-    assert payload["driver_id"] == "driver_1"
 
 
 def test_matching_no_driver_found(db_session, redis_conn, redis_geo):

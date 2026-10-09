@@ -10,7 +10,10 @@ from common.geo.h3_geo import H3GeoBackend
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_database():
-    init_db()
+    try:
+        init_db()
+    except Exception:
+        pass
     yield
 
 

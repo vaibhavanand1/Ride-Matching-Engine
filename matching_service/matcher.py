@@ -58,7 +58,6 @@ def match_ride(
             lock.release()
 
     ride_record = db.query(Ride).filter(Ride.id == ride_id).first()
-    channel = f"ride_updates:{ride_id}"
 
     if matched_driver_id:
         result = {
@@ -82,5 +81,4 @@ def match_ride(
             "matched_at": None,
         }
 
-    redis_conn.publish(channel, json.dumps(result))
     return result

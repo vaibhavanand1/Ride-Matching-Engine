@@ -16,47 +16,55 @@ A high-concurrency, distributed ride-matching backend system built in Python. De
                                           | (DriverTracking.StreamLocation)
                                           v
 +------------------+         +----------------------------+
-|   Rider Client   |         |       driver-service       |
+|   Rider Client   |         |   driver-service (Gateway) |
 |  (Locust / API)  |         |  FastAPI (8001) / gRPC (50051)
 +--------+---------+         +--------------+-------------+
          |                                  |
-         | HTTP REST                        | Spatial Index Updates
+         | HTTP REST                        | aiokafka Producer
          v                                  v
-+------------------+  HTTP Dispatch  +----------------------------+
-|  rider-service   +---------------->+      matching-service      |
-|  FastAPI (8000)  |                 |       FastAPI (8002)       |
-+--------+---------+                 +-------+------------+-------+
-         |                                   |            |
-         |                                   |            | Pub/Sub
-         | DB Read/Write                     | Lock/Query | (ride_updates)
-         v                                   v            v
-+-----------------------------------------------------------------+
-|                       Data & Messaging Layer                    |
-|                                                                 |
-|   PostgreSQL (5432/5433)             Redis 7 (6379)             |
-|   - riders                           - Spatial Index (GEO / H3) |
-|   - drivers                          - Distributed Locks (NX)   |
-|   - rides                            - Pub/Sub Notifications    |
-+-----------------------------------------------------------------+
++------------------+         +----------------------------+
+|  rider-service   |         | Kafka: `driver-telemetry`  |
+|  FastAPI (8000)  |         | (partitioned by driver_id) |
++--------+---------+         +--------------+-------------+
+         |                                  |
+         | aiokafka Producer                | Consumer Worker
+         v                                  v
++------------------+         +----------------------------+
+|  Kafka Topic:    |         | Spatial Index (Redis / H3) |
+|  `ride-requests` |         | + Heartbeat (last_seen)    |
++--------+---------+         +----------------------------+
+         |                                  ^
+         | Consumer Group: matching-group   |
+         v                                  | Spatial Query
++-------------------------------------------+----------------+
+|                   matching-service (Worker)                |
+|  FastAPI (8002) / Kafka Consumer Group                     |
+|  - Queries Redis GEO / Uber H3                             |
+|  - Acquires Distributed Lock (SET NX + Lua release)        |
+|  - Commits ACID transaction in PostgreSQL                  |
+|  - Publishes outcome to Kafka `ride-events` topic          |
+|  - Commits Kafka Consumer Offset (At-least-once guarantee) |
++------------------------------------------------------------+
 ```
 
 ### Component Breakdown
 
 1. **`driver-service` (FastAPI: 8001, gRPC: 50051)**:
-   - Exposes a bidirectional gRPC streaming endpoint (`StreamLocation`) where drivers stream continuous GPS updates `(driver_id, lat, lon, timestamp)` over a persistent HTTP/2 connection.
-   - Writes locations to Redis via the active `GeoBackend`.
-   - Exposes REST endpoints for driver registration (`POST /drivers`), status management (`PATCH /drivers/{id}/status`), and driver inspection (`GET /drivers/{id}`).
+   - Exposes a bidirectional gRPC streaming endpoint (`StreamLocation`) where drivers stream continuous GPS updates over a persistent HTTP/2 connection.
+   - Decouples network ingestion by producing updates directly to Kafka topic `driver-telemetry` (keyed by `driver_id` for per-driver strict FIFO partition ordering).
+   - Background consumer worker reads `driver-telemetry` and updates the active `GeoBackend` in Redis and heartbeat timestamps.
 
-2. **`matching-service` (FastAPI: 8002)**:
-   - Implements the core dispatch algorithm (`POST /matches/dispatch`).
+2. **`matching-service` (FastAPI: 8002 & Kafka Worker Group)**:
+   - Runs an asynchronous Kafka consumer group (`matching-service-group`) reading from `ride-requests`.
    - Uses the active `GeoBackend` to query nearby drivers within a given radius (e.g. 5 km).
    - Enforces strict mutual exclusion per driver using a Redis-backed distributed lock (`SET NX` with safe Lua release) to eliminate race conditions and double-assignments.
-   - Atomically transitions driver and ride status in both Redis and PostgreSQL.
-   - Emits match outcome events via Redis Pub/Sub (`ride_updates:{ride_id}`).
+   - Atomically commits driver and ride status in PostgreSQL.
+   - Emits durable match outcome events to Kafka topic `ride-events` and manually commits Kafka offsets (`at-least-once` processing guarantee).
+   - Also retains synchronous REST dispatch (`POST /matches/dispatch`) for benchmark comparisons.
 
 3. **`rider-service` (FastAPI: 8000)**:
    - Client-facing gateway for riders.
-   - `POST /rides/request`: Creates a ride request record with `pending` status, invokes `matching-service`, and returns the assignment status.
+   - `POST /rides/request`: Persists ride record with `pending` status in PostgreSQL and publishes `RideRequested` event to Kafka topic `ride-requests`.
    - `GET /rides/{ride_id}`: Polls ride status (`pending`, `matched`, `no_driver_found`).
 
 ---
@@ -255,3 +263,33 @@ The benchmark was executed against both spatial engines across driver fleet dens
 1. **Low Density (< 1,000 drivers)**: `Redis-GEO` has a slight latency advantage (~3-5ms lower p50) because the bounding calculation is executed directly inside Redis's C codebase in a single command, avoiding application-level multi-key lookups.
 2. **High Density (10,000+ drivers)**: As driver density increases, `H3`'s hexagonal ring expansion scales predictably because it partitions candidates into discrete cell buckets, avoiding scanning a single oversized Redis sorted set.
 3. **Horizontal Scalability**: While `Redis-GEO` is simpler for a single-node Redis deployment, `Uber H3` is architecturally superior for multi-node Redis clusters because H3 cell keys can be naturally distributed across cluster shards.
+
+---
+
+## Why Apache Kafka Replaced Redis Pub/Sub
+
+In real-world dispatch systems (Uber, Lyft), location telemetry and ride lifecycle events require a **durable, replayable commit log**:
+
+| Characteristic | Redis Pub/Sub (Previous) | Apache Kafka KRaft (Current) |
+| :--- | :--- | :--- |
+| **Persistence** | Ephemeral: In-memory, fire-and-forget. Dropped if receiver is disconnected. | Immutable commit log stored on disk. |
+| **Consumer Failure** | Messages dropped permanently during worker restarts. | Offset tracking: Consumer group resumes from last committed offset (`at-least-once`). |
+| **Backpressure** | Senders can overwhelm slow consumers or blow RAM buffers. | Partitioned pull model buffers spikes without dropping telemetry. |
+| **Auditability** | No historical replay. | Replayable stream for fraud detection, route replay, and analytics. |
+
+---
+
+## AWS Free Tier ($0 Setup on EC2 t2.micro / t3.micro)
+
+The system is packaged with automated provisioning scripts to deploy on an AWS EC2 `t2.micro` or `t3.micro` instance (100% Free under the 12-month AWS Free Tier).
+
+See the step-by-step guide in [deploy/AWS_FREE_TIER_DEPLOYMENT.md](file:///Users/vaibh/Documents/SDE%20Prep/projects/Distributed-Ride-Dispatcher/deploy/AWS_FREE_TIER_DEPLOYMENT.md).
+
+Quick setup on a fresh Ubuntu 24.04 EC2 instance:
+```bash
+git clone https://github.com/<YOUR-USERNAME>/Distributed-Ride-Dispatcher.git
+cd Distributed-Ride-Dispatcher
+chmod +x deploy/setup_ec2.sh
+./deploy/setup_ec2.sh
+```
+This automatically configures a **2GB Linux swap file** (preventing OOM on 1GB RAM instances), installs Docker, tunes memory parameters, and launches all microservices.
